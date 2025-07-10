@@ -73,7 +73,7 @@ static __inline double compute_elapsed_time_in_ms(const uint64_t start_seconds, 
     return (double)s_diff * 1000.0 + (double)m_diff;
 }
 
-void sleep_in_ms(const unsigned milliseconds) {
+static void sleep_in_ms(const unsigned milliseconds) {
     if (!milliseconds)
         return;
 #ifdef _WIN32
@@ -83,7 +83,7 @@ void sleep_in_ms(const unsigned milliseconds) {
 #endif
 }
 
-size_t get_file_size(FILE* f) {
+static size_t get_file_size(FILE* f) {
     if (f == NULL) {
         return 0;
     }

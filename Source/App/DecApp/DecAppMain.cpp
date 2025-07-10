@@ -9,10 +9,12 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <inttypes.h>
+extern "C"
+{
 #include "DecParamParser.h"
 #include "SemaphoreApp.h"
 #include "UtilityApp.h"
-
+}
 #ifndef TEST_STRIDE
 #define TEST_STRIDE 0
 #endif
@@ -125,7 +127,7 @@ static void* thread_send(void* arg) {
 
         //Optional block of code to measure latency
         {
-            user_private_data_t* user_data = malloc(sizeof(user_private_data_t));
+            user_private_data_t* user_data = static_cast<user_private_data_t*>(malloc(sizeof(user_private_data_t)));
             if (!user_data) {
                 fprintf(stderr, "Failed to allocate performance context!!! \n");
                 break;
@@ -190,7 +192,7 @@ static void* thread_send_packet(void* arg) {
 
         //Optional block of code to measure latency
         {
-            user_private_data_t* user_data = malloc(sizeof(user_private_data_t));
+            user_private_data_t* user_data = static_cast<user_private_data_t*>(malloc(sizeof(user_private_data_t)));
             if (!user_data) {
                 fprintf(stderr, "Failed to allocate performance context!!! \n");
                 break;
@@ -254,7 +256,7 @@ int32_t main(int32_t argc, char* argv[]) {
     }
 
     // GLOBAL VARIABLES
-    SvtJxsErrorType_t return_error = SvtJxsErrorNone; // Error Handling
+    int return_error = SvtJxsErrorNone; // Error Handling
     void* thread_send_handle = NULL;
 
     // Initialize config
