@@ -9,12 +9,16 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <inttypes.h>
+
 extern "C"
 {
 #include "DecParamParser.h"
 #include "SemaphoreApp.h"
 #include "UtilityApp.h"
 }
+
+#include "JpegXsSender.h"
+
 #ifndef TEST_STRIDE
 #define TEST_STRIDE 0
 #endif
@@ -74,179 +78,7 @@ SvtJxsErrorType_t read_data_from_file(FILE* f, uint8_t* buf, size_t size) {
 #define DEC_CAN_NOT_DECODE     (3)
 #define DEC_INVALID_PARAMETER  (4)
 
-static void* thread_send(void* arg) {
-    DecoderConfig_t* config_dec = (DecoderConfig_t*)arg;
-
-    double fps_interval_ms = 0;
-    if (config_dec->limit_fps) {
-        fps_interval_ms = 1000.0 / config_dec->limit_fps;
-    }
-
-    uint8_t* bitstream_ptr = config_dec->bitstream_buf_ref + config_dec->bitstream_offset;
-    uint64_t bitstream_size = config_dec->bitstream_buf_size - config_dec->bitstream_offset;
-
-    uint64_t thread_start_time[2];
-    get_current_time(&thread_start_time[0], &thread_start_time[1]);
-
-    uint8_t file_end = 0;
-    uint64_t send_frames = 0;
-
-    do {
-        uint32_t frame_size = 0;
-        SvtJxsErrorType_t ret = svt_jpeg_xs_decoder_get_single_frame_size(bitstream_ptr, bitstream_size, NULL, &frame_size, 1);
-        if (ret != SvtJxsErrorNone) {
-            break;
-        }
-        if (frame_size > bitstream_size) {
-            fprintf(stderr, "Last frame in file is invalid!!! \n");
-            break;
-        }
-
-        svt_jpeg_xs_bitstream_buffer_t bitstream;
-        bitstream.buffer = bitstream_ptr;
-        bitstream.used_size = frame_size;
-        bitstream.allocation_size = frame_size;
-
-        if (frame_size == bitstream_size) {
-            file_end = 1;
-            bitstream_ptr = config_dec->bitstream_buf_ref + config_dec->bitstream_offset;
-            bitstream_size = config_dec->bitstream_buf_size - config_dec->bitstream_offset;
-        }
-        else {
-            bitstream_ptr += frame_size;
-            bitstream_size -= frame_size;
-        }
-
-        svt_jpeg_xs_frame_t dec_input;
-        dec_input.user_prv_ctx_ptr = NULL;
-        ret = svt_jpeg_xs_frame_pool_get(config_dec->frame_pool, &dec_input, /*blocking*/ 1);
-        if (ret != SvtJxsErrorNone) {
-            break;
-        }
-        dec_input.bitstream = bitstream;
-
-        //Optional block of code to measure latency
-        {
-            user_private_data_t* user_data = static_cast<user_private_data_t*>(malloc(sizeof(user_private_data_t)));
-            if (!user_data) {
-                fprintf(stderr, "Failed to allocate performance context!!! \n");
-                break;
-            }
-
-            if (config_dec->limit_fps) {
-                uint64_t current_time_s, current_time_ms;
-                get_current_time(&current_time_s, &current_time_ms);
-                const double elapsed_time_ms = compute_elapsed_time_in_ms(
-                    thread_start_time[0], thread_start_time[1], current_time_s, current_time_ms);
-                const double predicted_time_ms = send_frames * fps_interval_ms;
-                const int32_t time_to_send_ms = (int32_t)(predicted_time_ms - elapsed_time_ms);
-
-                if (time_to_send_ms > 0) {
-                    sleep_in_ms(time_to_send_ms);
-                }
-            }
-
-            user_data->frame_num = send_frames;
-            get_current_time(&user_data->frame_start_time[0], &user_data->frame_start_time[1]);
-            dec_input.user_prv_ctx_ptr = user_data;
-        }
-
-        ret = svt_jpeg_xs_decoder_send_frame(&config_dec->decoder, &dec_input, /*blocking*/ 1);
-        if (ret != SvtJxsErrorNone) {
-            break;
-        }
-        send_frames++;
-    } while ((config_dec->frames_count == 0 && !file_end) || send_frames < config_dec->frames_count);
-
-    svt_jpeg_xs_decoder_send_eoc(&config_dec->decoder);
-
-    return NULL;
-}
-
 #define PACKET_SIZE_BYTES 10000
-
-static void* thread_send_packet(void* arg) {
-    DecoderConfig_t* config_dec = (DecoderConfig_t*)arg;
-
-    double fps_interval_ms = 0;
-    if (config_dec->limit_fps) {
-        fps_interval_ms = 1000.0 / config_dec->limit_fps;
-    }
-
-    uint8_t* bitstream_ptr = config_dec->bitstream_buf_ref + config_dec->bitstream_offset;
-    uint64_t bitstream_size = config_dec->bitstream_buf_size - config_dec->bitstream_offset;
-
-    uint64_t thread_start_time[2];
-    get_current_time(&thread_start_time[0], &thread_start_time[1]);
-
-    uint8_t file_end = 0;
-    uint64_t send_frames = 0;
-
-    do {
-        svt_jpeg_xs_frame_t dec_input;
-        dec_input.user_prv_ctx_ptr = NULL;
-        SvtJxsErrorType_t ret = svt_jpeg_xs_frame_pool_get(config_dec->frame_pool, &dec_input, /*blocking*/ 1);
-        if (ret != SvtJxsErrorNone) {
-            break;
-        }
-
-        //Optional block of code to measure latency
-        {
-            user_private_data_t* user_data = static_cast<user_private_data_t*>(malloc(sizeof(user_private_data_t)));
-            if (!user_data) {
-                fprintf(stderr, "Failed to allocate performance context!!! \n");
-                break;
-            }
-
-            if (config_dec->limit_fps) {
-                uint64_t current_time_s, current_time_ms;
-                get_current_time(&current_time_s, &current_time_ms);
-                const double elapsed_time_ms = compute_elapsed_time_in_ms(
-                    thread_start_time[0], thread_start_time[1], current_time_s, current_time_ms);
-                const double predicted_time_ms = send_frames * fps_interval_ms;
-                const int32_t time_to_send_ms = (int32_t)(predicted_time_ms - elapsed_time_ms);
-
-                if (time_to_send_ms > 0) {
-                    sleep_in_ms(time_to_send_ms);
-                }
-            }
-
-            user_data->frame_num = send_frames;
-            get_current_time(&user_data->frame_start_time[0], &user_data->frame_start_time[1]);
-            dec_input.user_prv_ctx_ptr = user_data;
-        }
-
-        do {
-            svt_jpeg_xs_bitstream_buffer_t bitstream;
-            memset(&bitstream, 0, sizeof(svt_jpeg_xs_bitstream_buffer_t));
-            bitstream.buffer = bitstream_ptr;
-            bitstream.used_size = PACKET_SIZE_BYTES > bitstream_size ? bitstream_size : PACKET_SIZE_BYTES;
-            bitstream.allocation_size = bitstream.used_size;
-
-            dec_input.bitstream = bitstream;
-
-            uint32_t bytes_used = 0;
-            ret = svt_jpeg_xs_decoder_send_packet(&config_dec->decoder, &dec_input, &bytes_used);
-
-            if (bytes_used == bitstream_size) {
-                file_end = 1;
-                bitstream_ptr = config_dec->bitstream_buf_ref + config_dec->bitstream_offset;
-                bitstream_size = config_dec->bitstream_buf_size - config_dec->bitstream_offset;
-            }
-            else {
-                bitstream_ptr += bytes_used;
-                bitstream_size -= bytes_used;
-            }
-        } while (ret == SvtJxsErrorDecoderBitstreamTooShort);
-
-        send_frames++;
-    } while ((config_dec->frames_count == 0 && !file_end) || send_frames < config_dec->frames_count);
-
-    svt_jpeg_xs_decoder_send_eoc(&config_dec->decoder);
-
-    return NULL;
-}
-
 /***************************************
  * Decoder App Main
  ***************************************/
@@ -257,7 +89,7 @@ int32_t main(int32_t argc, char* argv[]) {
 
     // GLOBAL VARIABLES
     int return_error = SvtJxsErrorNone; // Error Handling
-    void* thread_send_handle = NULL;
+    // void* thread_send_handle = NULL;
 
     // Initialize config
     DecoderConfig_t config_dec;
@@ -424,18 +256,24 @@ int32_t main(int32_t argc, char* argv[]) {
     get_current_time(&performance_context.processing_start_time[0], &performance_context.processing_start_time[1]);
 
     if (config_dec.decoder.packetization_mode) {
-        thread_send_handle = app_create_thread(thread_send_packet, &config_dec);
-    }
-    else {
-        thread_send_handle = app_create_thread(thread_send, &config_dec);
-    }
-    if (thread_send_handle == NULL) {
+        return_error = DEC_INVALID_PARAMETER;
         goto fail;
     }
-
+    else {
+        // thread_send_handle = app_create_thread(thread_send, &config_dec);
+    }
+    // if (thread_send_handle == NULL) {
+    //     goto fail;
+    // }
+    auto sender = JpegXsSender(config_dec);
+    bool isEos = false;
     uint64_t frames_received = 0;
     do {
         svt_jpeg_xs_frame_t dec_output;
+        if (!isEos && sender.sendFrame()) {
+            sender.sendEOC();
+            isEos = true;
+        }
         SvtJxsErrorType_t ret = svt_jpeg_xs_decoder_get_frame(&config_dec.decoder, &dec_output, 1 /*blocking*/);
         if (ret == SvtJxsDecoderEndOfCodestream) {
             break;
@@ -517,9 +355,9 @@ int32_t main(int32_t argc, char* argv[]) {
     fflush(stderr);
 
 fail:
-    if (thread_send_handle) {
-        app_destroy_thread(thread_send_handle);
-    }
+    // if (thread_send_handle) {
+    //     app_destroy_thread(thread_send_handle);
+    // }
     svt_jpeg_xs_frame_pool_free(config_dec.frame_pool);
     svt_jpeg_xs_decoder_close(&config_dec.decoder);
 
