@@ -265,7 +265,7 @@ int32_t main(int32_t argc, char* argv[]) {
     // if (thread_send_handle == NULL) {
     //     goto fail;
     // }
-    auto sender = JpegXsSender(config_dec);
+    auto sender = JpegXsFileSender(config_dec);
     bool isEos = false;
     uint64_t frames_received = 0;
     do {
