@@ -266,13 +266,18 @@ int32_t main(int32_t argc, char* argv[]) {
     //     goto fail;
     // }
     auto sender = JpegXsFileSender(config_dec);
+    auto decoder = JpegXsDecoder(config_dec);
     bool isEos = false;
     uint64_t frames_received = 0;
     do {
         svt_jpeg_xs_frame_t dec_output;
-        if (!isEos && sender.sendFrame()) {
-            sender.sendEOC();
-            isEos = true;
+        auto frame = sender.nextFrame();
+        if (!isEos) {
+            decoder.decodeFrame(frame.data,frame.size,frame.perf_ctx);
+            if (frame.is_last) {
+                decoder.sendEOC();
+                isEos = true;
+            }
         }
         SvtJxsErrorType_t ret = svt_jpeg_xs_decoder_get_frame(&config_dec.decoder, &dec_output, 1 /*blocking*/);
         if (ret == SvtJxsDecoderEndOfCodestream) {
