@@ -10,8 +10,7 @@
 #include <assert.h>
 #include <inttypes.h>
 
-extern "C"
-{
+extern "C" {
 #include "DecParamParser.h"
 #include "SemaphoreApp.h"
 #include "UtilityApp.h"
@@ -265,6 +264,17 @@ int32_t main(int32_t argc, char* argv[]) {
     // if (thread_send_handle == NULL) {
     //     goto fail;
     // }
+    // --- allocate one big output buffer for YUV ------------------------------------------------------------------------------------------------
+    size_t out_size = 0;
+    for (uint32_t c = 0; c < config_dec.image_config.components_num; ++c) {
+        out_size += config_dec.image_config.components[c].byte_size;
+    }
+    uint8_t* out_buf = (uint8_t*)malloc(out_size);
+    if (!out_buf) {
+        fprintf(stderr, "Unable to allocate output buffer\n");
+        goto fail;
+    }
+    // ---------------------------------------------------------------------------------------------------------------------
     auto sender = JpegXsFileSender(config_dec);
     auto decoder = JpegXsDecoder(config_dec);
     bool isEos = false;
@@ -273,40 +283,23 @@ int32_t main(int32_t argc, char* argv[]) {
         svt_jpeg_xs_frame_t dec_output;
         auto frame = sender.nextFrame();
         if (!isEos) {
-            decoder.decodeFrame(frame.data,frame.size,frame.perf_ctx);
+            decoder.decodeFrame(frame.data, frame.size, out_buf, out_size, frame.perf_ctx);
             if (frame.is_last) {
                 decoder.sendEOC();
                 isEos = true;
+                break;
             }
-        }
-        SvtJxsErrorType_t ret = svt_jpeg_xs_decoder_get_frame(&config_dec.decoder, &dec_output, 1 /*blocking*/);
-        if (ret == SvtJxsDecoderEndOfCodestream) {
-            break;
-        }
-        //Optional block of code to measure latency
-        if (dec_output.user_prv_ctx_ptr) {
-            user_private_data_t* prv_data_ = (user_private_data_t*)dec_output.user_prv_ctx_ptr;
-            assert(prv_data_->frame_num == frames_received);
-            uint64_t frame_end_time[2];
-            get_current_time(&frame_end_time[0], &frame_end_time[1]);
-
-            double frame_encode_time_ms = compute_elapsed_time_in_ms(
-                prv_data_->frame_start_time[0], prv_data_->frame_start_time[1], frame_end_time[0], frame_end_time[1]);
-
-            if (frame_encode_time_ms > performance_context.max_latency_ms) {
-                performance_context.max_latency_ms = frame_encode_time_ms;
-            }
-            if (frame_encode_time_ms < performance_context.min_latency_ms) {
-                performance_context.min_latency_ms = frame_encode_time_ms;
-            }
-            performance_context.total_latency_ms += frame_encode_time_ms;
-            free(prv_data_);
         }
 
         frames_received++;
         if (ret == SvtJxsErrorNone) {
             if (config_dec.out_file != NULL) {
-                write_frame(&config_dec.image_config, &dec_output.image, config_dec.out_file);
+                // write_frame(&config_dec.image_config, &dec_output.image, config_dec.out_file);
+                size_t written = fwrite(out_buf, 1, out_size, config_dec.out_file);
+                if (written != out_size) {
+                    fprintf(stderr, "error while writing to file!\n");
+                    return_error = -1;
+                }
             }
             if (config_dec.decoder.verbose >= VERBOSE_INFO_MULTITHREADING) {
                 fprintf(stderr, "Release frame received_frame %lu\n", (unsigned long)frames_received);
@@ -314,24 +307,9 @@ int32_t main(int32_t argc, char* argv[]) {
             fprintf(stderr, "\b\b\b\b\b\b\b\b\b%9lu", (unsigned long)frames_received);
             fflush(stderr);
         }
-        else { //(ret < 0)
-            if (ret == SvtJxsErrorDecoderConfigChange) {
-                fprintf(stderr,
-                        "Decoder error frame %lu: SvtJxsErrorDecoderConfigChange Try continue next frames...\n",
-                        (unsigned long)frames_received);
-            }
-            else {
-                fprintf(stderr,
-                        "Decoder error frame %lu: Error: %i Try continue next frames...\n",
-                        (unsigned long)frames_received,
-                        ret);
-            }
-            return_error = DEC_IGNORE_SOME_FRAMES;
-        }
-        svt_jpeg_xs_frame_pool_release(config_dec.frame_pool, &dec_output);
 
     } while (1);
-
+    free(out_buf);
     uint64_t decode_end_time[2]; // [sec, micro_sec] first frame sent
     get_current_time(&decode_end_time[0], &decode_end_time[1]);
     performance_context.total_process_time = compute_elapsed_time_in_ms(performance_context.processing_start_time[0],

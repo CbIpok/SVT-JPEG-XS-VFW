@@ -17,6 +17,7 @@ file(GLOB all_files
     "../Common/*.c"
     "*.h"
     "*.c"
+    "*.cpp"
 )
 
 # App Source Files

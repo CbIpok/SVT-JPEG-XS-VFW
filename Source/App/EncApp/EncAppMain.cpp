@@ -21,9 +21,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+extern "C"
+{
 #include "EncAppConfig.h"
 #include "SemaphoreApp.h"
 #include "UtilityApp.h"
+}
+
 
 #ifndef TEST_STRIDE
 #define TEST_STRIDE 0
@@ -132,7 +136,7 @@ static void *thread_send(void *arg) {
 
         //Optional block of code to measure latency
         {
-            user_private_data_t *user_data = malloc(sizeof(user_private_data_t));
+            user_private_data_t *user_data = static_cast<user_private_data_t*>(malloc(sizeof(user_private_data_t)));
             if (!user_data) {
                 fprintf(stderr, "Failed to allocate performance context!!! \n");
             }
@@ -342,7 +346,7 @@ int32_t main(int32_t argc, char *argv[]) {
         }
         else {
             fprintf(stderr, "---------Error encode frame %lu ---------\n", (unsigned long)frames_received);
-            return_error = ENC_IGNORE_SOME_FRAMES;
+            return_error = static_cast<SvtJxsErrorType>(ENC_IGNORE_SOME_FRAMES);
         }
 
         svt_jpeg_xs_frame_pool_release(config_enc.frame_pool, &enc_output);
