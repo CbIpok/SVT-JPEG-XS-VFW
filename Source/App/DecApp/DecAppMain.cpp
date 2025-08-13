@@ -294,7 +294,7 @@ int32_t main(int32_t argc, char* argv[]) {
         frames_received++;
         if (ret == SvtJxsErrorNone) {
             if (config_dec.out_file != NULL) {
-                // write_frame(&config_dec.image_config, &dec_output.image, config_dec.out_file);
+                write_frame(&config_dec.image_config, &dec_output.image, config_dec.out_file);
                 size_t written = fwrite(out_buf, 1, out_size, config_dec.out_file);
                 if (written != out_size) {
                     fprintf(stderr, "error while writing to file!\n");
