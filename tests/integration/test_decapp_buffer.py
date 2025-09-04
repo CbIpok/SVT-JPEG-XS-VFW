@@ -23,9 +23,10 @@ def main():
         enc_args = shlex.split(enc_cfg.read_text())
         subprocess.run([enc_app, '-i', str(yuv), *enc_args, '-b', str(bitstream)], check=True)
     dec_args = shlex.split(dec_cfg.read_text())
-    tmp1 = tempfile.NamedTemporaryFile(delete=False)
-    tmp2 = tempfile.NamedTemporaryFile(delete=False)
-    tmp1.close(); tmp2.close()
+    tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".yuv")
+    tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".yuv")
+    tmp1.close()
+    tmp2.close()
     try:
         subprocess.run([dec_app, '-i', str(bitstream), '-o', tmp1.name, *dec_args], check=True)
         subprocess.run([dec_app_buffer, '-i', str(bitstream), '-o', tmp2.name, *dec_args], check=True)
@@ -38,8 +39,11 @@ def main():
             return 1
         return 0
     finally:
-        Path(tmp1.name).unlink(missing_ok=True)
-        Path(tmp2.name).unlink(missing_ok=True)
+        for tmp in (tmp1.name, tmp2.name):
+            try:
+                Path(tmp).unlink()
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == '__main__':
