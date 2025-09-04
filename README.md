@@ -65,6 +65,23 @@ Supported OS versions:
 - __API headers location__
   - API headers can be found under `Source/API`
 
+## Buffer-variants of applications
+
+In addition to the standard command line tools, buffer-based copies of the
+encoder and decoder applications are provided as `EncAppBuffer` and
+`DecAppBuffer`.  These variants preserve the current behaviour but expose
+stub interfaces (`buffer_init`, `(en|de)code_frame`, `buffer_close`) that are
+intended for future buffer-to-buffer processing.
+
+To verify equivalence with the original tools run the Google Test binary:
+
+```sh
+./Bin/<config>/BufferAppTests
+```
+
+The tests generate minimal test data and ensure the original and buffer
+variants produce identical outputs.
+
 ## Encoder
 
 ### Supported colour formats
