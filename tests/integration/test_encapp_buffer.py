@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import os
 import shlex
 import subprocess
 import sys
@@ -18,13 +19,20 @@ def main():
     if not yuv.exists():
         yuv.write_bytes(b"\x00" * 384)
     args = shlex.split(cfg.read_text())
+
+    # ensure the applications can locate their shared libraries on Windows by
+    # prepending the binary directory to PATH
+    bin_dir = Path(enc_app).resolve().parent
+    env = dict(os.environ)
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+
     tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".jxs")
     tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".jxs")
     tmp1.close()
     tmp2.close()
     try:
-        subprocess.run([enc_app, '-i', str(yuv), *args, '-b', tmp1.name], check=True)
-        subprocess.run([enc_app_buffer, '-i', str(yuv), *args, '-b', tmp2.name], check=True)
+        subprocess.run([enc_app, '-i', str(yuv), *args, '-b', tmp1.name], check=True, env=env)
+        subprocess.run([enc_app_buffer, '-i', str(yuv), *args, '-b', tmp2.name], check=True, env=env)
         hash1 = hashlib.sha256(Path(tmp1.name).read_bytes()).hexdigest()
         hash2 = hashlib.sha256(Path(tmp2.name).read_bytes()).hexdigest()
         print(hash1, tmp1.name)

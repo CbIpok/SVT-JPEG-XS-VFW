@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import os
 import shlex
 import subprocess
 import sys
@@ -19,17 +20,23 @@ def main():
     bitstream = data_dir / "sample.jxs"
     if not yuv.exists():
         yuv.write_bytes(b"\x00" * 384)
+
+    # ensure applications find their DLLs on Windows by prepending bin dir to PATH
+    bin_dir = Path(dec_app).resolve().parent
+    env = dict(os.environ)
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+
     if not bitstream.exists():
         enc_args = shlex.split(enc_cfg.read_text())
-        subprocess.run([enc_app, '-i', str(yuv), *enc_args, '-b', str(bitstream)], check=True)
+        subprocess.run([enc_app, '-i', str(yuv), *enc_args, '-b', str(bitstream)], check=True, env=env)
     dec_args = shlex.split(dec_cfg.read_text())
     tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".yuv")
     tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".yuv")
     tmp1.close()
     tmp2.close()
     try:
-        subprocess.run([dec_app, '-i', str(bitstream), '-o', tmp1.name, *dec_args], check=True)
-        subprocess.run([dec_app_buffer, '-i', str(bitstream), '-o', tmp2.name, *dec_args], check=True)
+        subprocess.run([dec_app, '-i', str(bitstream), '-o', tmp1.name, *dec_args], check=True, env=env)
+        subprocess.run([dec_app_buffer, '-i', str(bitstream), '-o', tmp2.name, *dec_args], check=True, env=env)
         hash1 = hashlib.sha256(Path(tmp1.name).read_bytes()).hexdigest()
         hash2 = hashlib.sha256(Path(tmp2.name).read_bytes()).hexdigest()
         print(hash1, tmp1.name)
