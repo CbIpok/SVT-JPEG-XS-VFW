@@ -268,6 +268,23 @@ Threading, performance:
                             (default: 0, which means lowest possible number of threads is created)
 ```
 
+## Buffer-variants of applications
+
+Copies of the encoder and decoder applications are available in
+`Source/App/EncAppBuffer` and `Source/App/DecAppBuffer`.  They currently
+mirror the original command line tools and include stubs
+`buffer_init`, `encode_frame`/`decode_frame` and `buffer_close` that will be
+replaced with a future buffer-to-buffer interface.
+
+Integration tests check that the buffer variants produce identical output.
+Small sample YUV and bitstream files are generated automatically in
+`tests/data` if they are absent.
+After building the project they can be executed with:
+
+```bash
+ctest -R buffer
+```
+
 ## Encoder and Decoder design
 
 Please see [Encoder design](documentation/encoder/svt-jpegxs-encoder-design.md)
