@@ -331,6 +331,8 @@ endif()
 
 if(BUILD_TESTING)
     enable_testing()
+    # Show detailed output from failing tests without requiring --output-on-failure
+    set(CTEST_OUTPUT_ON_FAILURE ON)
     set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
     set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)

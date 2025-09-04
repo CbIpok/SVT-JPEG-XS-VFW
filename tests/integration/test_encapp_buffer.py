@@ -30,9 +30,20 @@ def main():
     tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".jxs")
     tmp1.close()
     tmp2.close()
+
+    def run(cmd):
+        proc = subprocess.run(cmd, env=env, text=True, capture_output=True)
+        if proc.returncode != 0:
+            print("command failed:", shlex.join(cmd), file=sys.stderr)
+            if proc.stdout:
+                print(proc.stdout, file=sys.stderr)
+            if proc.stderr:
+                print(proc.stderr, file=sys.stderr)
+            raise SystemExit(proc.returncode)
+
     try:
-        subprocess.run([enc_app, '-i', str(yuv), *args, '-b', tmp1.name], check=True, env=env)
-        subprocess.run([enc_app_buffer, '-i', str(yuv), *args, '-b', tmp2.name], check=True, env=env)
+        run([enc_app, '-i', str(yuv), *args, '-b', tmp1.name])
+        run([enc_app_buffer, '-i', str(yuv), *args, '-b', tmp2.name])
         hash1 = hashlib.sha256(Path(tmp1.name).read_bytes()).hexdigest()
         hash2 = hashlib.sha256(Path(tmp2.name).read_bytes()).hexdigest()
         print(hash1, tmp1.name)

@@ -26,17 +26,27 @@ def main():
     env = dict(os.environ)
     env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
 
+    def run(cmd):
+        proc = subprocess.run(cmd, env=env, text=True, capture_output=True)
+        if proc.returncode != 0:
+            print("command failed:", shlex.join(cmd), file=sys.stderr)
+            if proc.stdout:
+                print(proc.stdout, file=sys.stderr)
+            if proc.stderr:
+                print(proc.stderr, file=sys.stderr)
+            raise SystemExit(proc.returncode)
+
     if not bitstream.exists():
         enc_args = shlex.split(enc_cfg.read_text())
-        subprocess.run([enc_app, '-i', str(yuv), *enc_args, '-b', str(bitstream)], check=True, env=env)
+        run([enc_app, '-i', str(yuv), *enc_args, '-b', str(bitstream)])
     dec_args = shlex.split(dec_cfg.read_text())
     tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".yuv")
     tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".yuv")
     tmp1.close()
     tmp2.close()
     try:
-        subprocess.run([dec_app, '-i', str(bitstream), '-o', tmp1.name, *dec_args], check=True, env=env)
-        subprocess.run([dec_app_buffer, '-i', str(bitstream), '-o', tmp2.name, *dec_args], check=True, env=env)
+        run([dec_app, '-i', str(bitstream), '-o', tmp1.name, *dec_args])
+        run([dec_app_buffer, '-i', str(bitstream), '-o', tmp2.name, *dec_args])
         hash1 = hashlib.sha256(Path(tmp1.name).read_bytes()).hexdigest()
         hash2 = hashlib.sha256(Path(tmp2.name).read_bytes()).hexdigest()
         print(hash1, tmp1.name)
