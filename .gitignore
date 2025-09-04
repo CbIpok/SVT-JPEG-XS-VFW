@@ -8,3 +8,6 @@ Build/coverage_linux
 *.patch
 *.raw
 *.log
+/.idea
+/cmake-build-debug-visual-studio
+/cmake-build-release-visual-studio
