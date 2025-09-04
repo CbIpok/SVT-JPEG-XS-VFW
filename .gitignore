@@ -4,6 +4,7 @@ Build/windows/
 Build/eclipse/
 Build/coverage_linux
 *.yuv
+*.jxs
 *.bin
 *.patch
 *.raw

@@ -55,7 +55,7 @@ include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 
-set(CMAKE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/Bin/${CMAKE_BUILD_TYPE}/" CACHE PATH "Location to write the resulting binaries to")
+set(CMAKE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/Bin" CACHE PATH "Location to write the resulting binaries to")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_OUTPUT_DIRECTORY})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_OUTPUT_DIRECTORY})
@@ -325,17 +325,20 @@ if(BUILD_APPS)
     add_subdirectory(Source/App/EncApp)
     add_subdirectory(Source/App/SampleEncoder)
     add_subdirectory(Source/App/SampleDecoder)
+    add_subdirectory(Source/App/DecAppBuffer)
+    add_subdirectory(Source/App/EncAppBuffer)
 endif()
 
 if(BUILD_TESTING)
+    enable_testing()
+    # Show detailed output from failing tests without requiring --output-on-failure
+    set(CTEST_OUTPUT_ON_FAILURE ON)
     set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
     set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory(third_party/googletest-1.14.0)
-
-    add_subdirectory(tests/UnitTests)
-    #enable_testing()
+    add_subdirectory(tests)
 endif()
 
 add_subdirectory(third_party/cpuinfo)
