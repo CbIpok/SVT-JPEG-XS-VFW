@@ -11,3 +11,4 @@ Build/coverage_linux
 /.idea
 /cmake-build-debug-visual-studio
 /cmake-build-release-visual-studio
+/Build
