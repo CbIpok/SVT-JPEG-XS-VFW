@@ -54,8 +54,10 @@ TEST(BufferApps, EncodeMatch) {
     fs::path out2 = tmp / "enc_buf.jxs";
     write_yuv(input);
     std::string cfg_args = read_cfg(data_dir() / "enc.cfg");
-    ASSERT_EQ(0, run_cmd("./SvtJpegxsEncApp " + cfg_args + " -i \"" + input.string() + "\" -b \"" + out1.string() + "\""));
-    ASSERT_EQ(0, run_cmd("./EncAppBuffer " + cfg_args + " -i \"" + input.string() + "\" -b \"" + out2.string() + "\""));
+    fs::path enc_app = fs::path(".") / "SvtJpegxsEncApp";
+    fs::path enc_app_buf = fs::path(".") / "EncAppBuffer";
+    ASSERT_EQ(0, run_cmd(enc_app.string() + " " + cfg_args + " -i \"" + input.string() + "\" -b \"" + out1.string() + "\""));
+    ASSERT_EQ(0, run_cmd(enc_app_buf.string() + " " + cfg_args + " -i \"" + input.string() + "\" -b \"" + out2.string() + "\""));
     EXPECT_TRUE(files_equal(out1, out2));
 }
 
@@ -68,10 +70,13 @@ TEST(BufferApps, DecodeMatch) {
     fs::path out2 = tmp / "dec_buf.yuv";
     write_yuv(input);
     std::string enc_cfg = read_cfg(data_dir() / "enc.cfg");
-    ASSERT_EQ(0, run_cmd("./SvtJpegxsEncApp " + enc_cfg + " -i \"" + input.string() + "\" -b \"" + bitstream.string() + "\""));
+    fs::path enc_app = fs::path(".") / "SvtJpegxsEncApp";
+    fs::path dec_app = fs::path(".") / "SvtJpegxsDecApp";
+    fs::path dec_app_buf = fs::path(".") / "DecAppBuffer";
+    ASSERT_EQ(0, run_cmd(enc_app.string() + " " + enc_cfg + " -i \"" + input.string() + "\" -b \"" + bitstream.string() + "\""));
     std::string dec_cfg = read_cfg(data_dir() / "dec.cfg");
-    ASSERT_EQ(0, run_cmd("./SvtJpegxsDecApp " + dec_cfg + " -i \"" + bitstream.string() + "\" -o \"" + out1.string() + "\""));
-    ASSERT_EQ(0, run_cmd("./DecAppBuffer " + dec_cfg + " -i \"" + bitstream.string() + "\" -o \"" + out2.string() + "\""));
+    ASSERT_EQ(0, run_cmd(dec_app.string() + " " + dec_cfg + " -i \"" + bitstream.string() + "\" -o \"" + out1.string() + "\""));
+    ASSERT_EQ(0, run_cmd(dec_app_buf.string() + " " + dec_cfg + " -i \"" + bitstream.string() + "\" -o \"" + out2.string() + "\""));
     EXPECT_TRUE(files_equal(out1, out2));
 }
 

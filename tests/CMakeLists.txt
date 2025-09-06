@@ -9,6 +9,6 @@ target_link_libraries(BufferAppTests PRIVATE gtest gtest_main)
 
 target_compile_definitions(BufferAppTests PRIVATE TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
-add_test(NAME BufferAppTests
+add_test(NAME buffer_apps
     COMMAND BufferAppTests
-    WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:BufferAppTests>)
