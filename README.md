@@ -65,6 +65,26 @@ Supported OS versions:
 - __API headers location__
   - API headers can be found under `Source/API`
 
+## Buffer-variants of applications
+
+In addition to the standard command line tools, buffer-based copies of the
+encoder and decoder applications are provided as `EncAppBuffer` and
+`DecAppBuffer`.  These variants preserve the current behaviour but expose
+stub interfaces (`buffer_init`, `(en|de)code_frame`, `buffer_close`) that are
+intended for future buffer-to-buffer processing.
+
+To verify that the buffer variants produce identical output to the original
+tools, build with testing enabled and run the integration tests via CTest:
+
+```sh
+cmake -S . -B Build -DBUILD_TESTING=ON
+cmake --build Build --config Release
+ctest --test-dir Build -C Release -R buffer --output-on-failure
+```
+
+The tests generate minimal test data on the fly and compare the results from
+`EncAppBuffer`/`DecAppBuffer` against the standard applications.
+
 ## Encoder
 
 ### Supported colour formats
