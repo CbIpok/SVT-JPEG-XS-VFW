@@ -330,7 +330,9 @@ if(BUILD_APPS)
 endif()
 
 if(BUILD_TESTING)
-    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+    # Link Googletest statically to avoid odd test discovery issues in Release
+    # and to ensure tests are embedded in the exe properly.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
