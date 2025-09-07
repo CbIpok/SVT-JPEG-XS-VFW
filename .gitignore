@@ -12,3 +12,5 @@ Build/coverage_linux
 /cmake-build-debug-visual-studio
 /cmake-build-release-visual-studio
 /Build
+
+tests/data/override/*.cfg
