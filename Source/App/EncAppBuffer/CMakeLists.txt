@@ -20,7 +20,9 @@ add_executable(EncAppBuffer
 #********** SET COMPILE FLAGS************
 # Link the Encoder App
 target_link_libraries(EncAppBuffer
-    SvtJpegxsBufferCodec SvtJpegxsLib)
+    SvtJpegxsLib
+    vfw32
+    avifil32)
 
 if(UNIX)
     target_link_libraries(EncAppBuffer

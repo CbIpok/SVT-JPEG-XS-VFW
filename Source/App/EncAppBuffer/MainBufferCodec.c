@@ -1,10 +1,12 @@
-/* Buffer-based EncApp using BufferCodec wrapper */
+/* Buffer-based EncApp using VFW wrapper */
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <windows.h>
+#include <vfw.h>
 #include "EncAppConfig.h"
 #include "UtilityApp.h"
-#include "BufferCodec.h"
+#include "BufferCodec.h" /* for BUFFER_CODEC_* macros only */
 
 #ifndef TEST_STRIDE
 #define TEST_STRIDE 0
@@ -23,7 +25,7 @@ static int32_t read_yuv_frame(FILE* in_file, svt_jpeg_xs_image_config_t* image_c
     return 0;
 }
 
-static uint32_t get_single_frame_size(svt_jpeg_xs_image_config_t* image_config) {
+static uint32_t get_single_frame_size(const svt_jpeg_xs_image_config_t* image_config) {
     uint32_t size = 0;
     for (uint8_t c = 0; c < image_config->components_num; ++c) size += image_config->components[c].byte_size;
     return size;
@@ -43,6 +45,61 @@ static void show_encoding_progress(EncoderConfig_t* config, uint64_t encoded_fra
 }
 
 #define ENC_IGNORE_SOME_FRAMES (11)
+
+typedef struct SJXS_Compress {
+    const uint8_t* in;
+    uint32_t in_size;
+    uint8_t* out;
+    uint32_t out_capacity;
+    uint32_t out_used;
+} SJXS_Compress;
+
+static void fill_image_cfg_from_macros(svt_jpeg_xs_image_config_t* img) {
+    memset(img, 0, sizeof(*img));
+    img->width = BUFFER_CODEC_WIDTH;
+    img->height = BUFFER_CODEC_HEIGHT;
+    img->bit_depth = BUFFER_CODEC_BIT_DEPTH;
+    if (BUFFER_CODEC_COLOUR_FORMAT == 0) img->format = COLOUR_FORMAT_PLANAR_YUV400;
+    else if (BUFFER_CODEC_COLOUR_FORMAT == 1) img->format = COLOUR_FORMAT_PLANAR_YUV420;
+    else if (BUFFER_CODEC_COLOUR_FORMAT == 2) img->format = COLOUR_FORMAT_PLANAR_YUV422;
+    else img->format = COLOUR_FORMAT_PLANAR_YUV444_OR_RGB;
+    // derive components layout (planar)
+    if (img->format == COLOUR_FORMAT_PLANAR_YUV400) {
+        img->components_num = 1;
+        img->components[0].width = img->width;
+        img->components[0].height = img->height;
+        img->components[0].byte_size = (img->width * img->height * ((img->bit_depth+7)/8));
+    } else if (img->format == COLOUR_FORMAT_PLANAR_YUV420) {
+        img->components_num = 3;
+        const uint32_t bytes_per_sample = ((img->bit_depth + 7) / 8);
+        img->components[0].width = img->width;
+        img->components[0].height = img->height;
+        img->components[0].byte_size = img->components[0].width * img->components[0].height * bytes_per_sample;
+        img->components[1].width = (img->width + 1) / 2;
+        img->components[1].height = (img->height + 1) / 2;
+        img->components[1].byte_size = img->components[1].width * img->components[1].height * bytes_per_sample;
+        img->components[2] = img->components[1];
+    } else if (img->format == COLOUR_FORMAT_PLANAR_YUV422) {
+        img->components_num = 3;
+        const uint32_t bytes_per_sample = ((img->bit_depth + 7) / 8);
+        img->components[0].width = img->width;
+        img->components[0].height = img->height;
+        img->components[0].byte_size = img->components[0].width * img->components[0].height * bytes_per_sample;
+        img->components[1].width = (img->width + 1) / 2;
+        img->components[1].height = img->height;
+        img->components[1].byte_size = img->components[1].width * img->components[1].height * bytes_per_sample;
+        img->components[2] = img->components[1];
+    } else {
+        // YUV444/RGB planar
+        img->components_num = 3;
+        const uint32_t bytes_per_sample = ((img->bit_depth + 7) / 8);
+        for (int c = 0; c < 3; ++c) {
+            img->components[c].width = img->width;
+            img->components[c].height = img->height;
+            img->components[c].byte_size = img->width * img->height * bytes_per_sample;
+        }
+    }
+}
 
 int32_t main(int32_t argc, char* argv[]) {
     if (get_help(argc, argv)) return 0;
@@ -69,27 +126,8 @@ int32_t main(int32_t argc, char* argv[]) {
     return_error = verify_settings(&config_enc);
     if (return_error != SvtJxsErrorNone) { fprintf(stderr, "Error in configuration\n"); return return_error; }
 
-    uint32_t bs_capacity = 0;
-    buffer_encoder_t* enc = buffer_encoder_create();
-    if (!enc) { fprintf(stderr, "Failed to create buffer encoder\n"); return SvtJxsErrorInsufficientResources; }
-    buffer_image_config_t img_cfg;
-    if (buffer_encoder_get_image_config(enc, &img_cfg, &bs_capacity) != 0) { fprintf(stderr, "Encoder cfg failed\n"); return SvtJxsErrorUndefined; }
-
-    // Map to app image_config for I/O helpers
-    config_enc.image_config.width = img_cfg.width;
-    config_enc.image_config.height = img_cfg.height;
-    config_enc.image_config.bit_depth = img_cfg.bit_depth;
-    // infer components
-    if (BUFFER_CODEC_COLOUR_FORMAT == 0) config_enc.image_config.format = COLOUR_FORMAT_PLANAR_YUV400;
-    else if (BUFFER_CODEC_COLOUR_FORMAT == 1) config_enc.image_config.format = COLOUR_FORMAT_PLANAR_YUV420;
-    else if (BUFFER_CODEC_COLOUR_FORMAT == 2) config_enc.image_config.format = COLOUR_FORMAT_PLANAR_YUV422;
-    else config_enc.image_config.format = COLOUR_FORMAT_PLANAR_YUV444_OR_RGB;
-    config_enc.image_config.components_num = img_cfg.components_num;
-    for (uint8_t c = 0; c < img_cfg.components_num; ++c) {
-        config_enc.image_config.components[c].width = img_cfg.comp[c].width;
-        config_enc.image_config.components[c].height = img_cfg.comp[c].height;
-        config_enc.image_config.components[c].byte_size = img_cfg.comp[c].byte_size;
-    }
+    // Derive image config from BufferCodec macros
+    fill_image_cfg_from_macros(&config_enc.image_config);
 
     if (config_enc.frames_count == 0) {
         int64_t file_size = get_file_size(config_enc.in_file);
@@ -101,8 +139,24 @@ int32_t main(int32_t argc, char* argv[]) {
     uint32_t frame_size = get_single_frame_size(&config_enc.image_config);
     uint8_t* in_frame = (uint8_t*)malloc(frame_size);
     if (!in_frame) { fprintf(stderr, "Memory allocation failed\n"); return SvtJxsErrorInsufficientResources; }
+    // Bitstream buffer: conservative capacity equals frame_size (BufferCodec reports capacity elsewhere, but we use BEGIN to init in DLL)
+    uint32_t bs_capacity = frame_size; // will be enough for tests (4 bpp target)
     uint8_t* bs_buf = (uint8_t*)malloc(bs_capacity);
     if (!bs_buf) { fprintf(stderr, "Memory allocation failed\n"); return SvtJxsErrorInsufficientResources; }
+
+    // Open VFW codec DLL and compressor instance
+    HINSTANCE lib = LoadLibraryA("SvtJpegxsVfwCodec.dll");
+    if (!lib) { fprintf(stderr, "Failed to load SvtJpegxsVfwCodec.dll\n"); return SvtJxsErrorUndefined; }
+    FARPROC drv = GetProcAddress(lib, "DriverProc");
+    HIC hic = ICOpen(mmioFOURCC('S','J','X','S'), mmioFOURCC('J','X','S','E'), ICMODE_COMPRESS);
+    if (!hic && drv) {
+        // Fallback to open via function pointer
+        hic = ICOpenFunction(mmioFOURCC('S','J','X','S'), mmioFOURCC('J','X','S','E'), ICMODE_COMPRESS, drv);
+    }
+    if (!hic) { fprintf(stderr, "ICOpen failed for compressor\n"); FreeLibrary(lib); return SvtJxsErrorUndefined; }
+    if (ICSendMessage(hic, ICM_COMPRESS_BEGIN, 0, 0) != ICERR_OK) {
+        fprintf(stderr, "ICM_COMPRESS_BEGIN failed\n"); ICClose(hic); FreeLibrary(lib); return SvtJxsErrorUndefined;
+    }
 
     uint64_t frames_done = 0;
     while (frames_done < config_enc.frames_count) {
@@ -112,15 +166,22 @@ int32_t main(int32_t argc, char* argv[]) {
             rd = fread(in_frame, 1, frame_size, config_enc.in_file);
             if (rd != frame_size) break;
         }
-        uint32_t used = 0;
-        int r = buffer_encoder_encode_frame(enc, (const uint8_t*)in_frame, bs_buf, bs_capacity, &used);
-        if (r != 0) { fprintf(stderr, "Encode error %d\n", r); return_error = SvtJxsErrorUndefined; break; }
-        if (config_enc.out_file && used) fwrite(bs_buf, 1, used, config_enc.out_file);
+        SJXS_Compress ic = {0};
+        ic.in = (const uint8_t*)in_frame;
+        ic.in_size = frame_size;
+        ic.out = bs_buf;
+        ic.out_capacity = bs_capacity;
+        if (ICSendMessage(hic, ICM_COMPRESS, (LPARAM)&ic, sizeof(ic)) != ICERR_OK) {
+            fprintf(stderr, "ICM_COMPRESS failed\n"); return_error = SvtJxsErrorUndefined; break;
+        }
+        if (config_enc.out_file && ic.out_used) fwrite(bs_buf, 1, ic.out_used, config_enc.out_file);
         frames_done++;
         show_encoding_progress(&config_enc, frames_done);
     }
 
-    buffer_encoder_destroy(enc);
+    ICSendMessage(hic, ICM_COMPRESS_END, 0, 0);
+    ICClose(hic);
+    FreeLibrary(lib);
     free(in_frame);
     free(bs_buf);
     if (config_enc.in_file) fclose(config_enc.in_file);

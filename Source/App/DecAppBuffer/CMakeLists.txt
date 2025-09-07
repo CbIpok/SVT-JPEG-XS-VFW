@@ -20,7 +20,9 @@ add_executable(DecAppBuffer
 #********** SET COMPILE FLAGS************
 # Link the Decoder App
 target_link_libraries(DecAppBuffer
-    SvtJpegxsBufferCodec SvtJpegxsLib)
+    SvtJpegxsLib
+    vfw32
+    avifil32)
 
 if(UNIX)
     target_link_libraries(DecAppBuffer

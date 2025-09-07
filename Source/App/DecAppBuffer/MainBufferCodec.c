@@ -1,10 +1,13 @@
-/* Buffer-based DecApp using BufferCodec wrapper */
+/* Buffer-based DecApp using VFW wrapper */
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <windows.h>
+#include <vfw.h>
 #include "DecParamParser.h"
 #include "UtilityApp.h"
-#include "BufferCodec.h"
+#include "BufferCodec.h" /* for BUFFER_CODEC_* macros */
+#include "SvtJpegxsDec.h"
 
 static uint32_t frame_size_from_cfg(const svt_jpeg_xs_image_config_t* cfg) {
     uint32_t sz = 0;
@@ -22,6 +25,18 @@ SvtJxsErrorType_t read_data_from_file(FILE* f, uint8_t* buf, size_t size) {
         return SvtJxsErrorUndefined;
     }
     return SvtJxsErrorNone;
+}
+
+typedef struct SJXS_Decompress {
+    const uint8_t* in;
+    uint32_t in_size;
+    uint8_t* out;
+    uint32_t out_capacity;
+    uint32_t out_used;
+} SJXS_Decompress;
+
+static void copy_img_cfg(const svt_jpeg_xs_image_config_t* src, svt_jpeg_xs_image_config_t* dst) {
+    *dst = *src;
 }
 
 int32_t main(int32_t argc, char* argv[]) {
@@ -61,35 +76,79 @@ int32_t main(int32_t argc, char* argv[]) {
         if (!find) { fprintf(stderr, "Detect Bitstream header FAILED!\n"); return SvtJxsErrorUndefined; }
     }
 
-    // init decoder wrapper from first frame
+    // Detect actual output layout from bitstream header using SVT API
+    uint8_t* first_bs = config_dec.bitstream_buf_ref + config_dec.bitstream_offset;
+    uint32_t first_bs_size = (uint32_t)(config_dec.bitstream_buf_size - config_dec.bitstream_offset);
     uint32_t frame_size = 0;
-    return_error = svt_jpeg_xs_decoder_get_single_frame_size(config_dec.bitstream_buf_ref + config_dec.bitstream_offset,
-                                                             config_dec.bitstream_buf_size - config_dec.bitstream_offset,
-                                                             NULL, &frame_size, 1);
+    return_error = svt_jpeg_xs_decoder_get_single_frame_size(first_bs, first_bs_size, NULL, &frame_size, 1);
     if (return_error != SvtJxsErrorNone) { fprintf(stderr, "Unable to get first frame size\n"); if (!config_dec.force_decode) return return_error; }
-
-    buffer_image_config_t img_cfg;
-    buffer_decoder_t* dec = buffer_decoder_create_from_bitstream(
-        config_dec.bitstream_buf_ref + config_dec.bitstream_offset,
-        config_dec.bitstream_buf_size - config_dec.bitstream_offset,
-        &img_cfg);
-    if (!dec) { fprintf(stderr, "Decoder init failed\n"); return SvtJxsErrorUndefined; }
-    // Map to app image_config
-    config_dec.image_config.width = img_cfg.width;
-    config_dec.image_config.height = img_cfg.height;
-    config_dec.image_config.bit_depth = img_cfg.bit_depth;
-    // format unknown here, not needed for raw write
-    config_dec.image_config.components_num = img_cfg.components_num;
-    for (uint8_t c = 0; c < img_cfg.components_num; ++c) {
-        config_dec.image_config.components[c].width = img_cfg.comp[c].width;
-        config_dec.image_config.components[c].height = img_cfg.comp[c].height;
-        config_dec.image_config.components[c].byte_size = img_cfg.comp[c].byte_size;
+    svt_jpeg_xs_decoder_api_t tmp_dec = {0};
+    svt_jpeg_xs_image_config_t detected_img = {0};
+    if (svt_jpeg_xs_decoder_init(SVT_JPEGXS_API_VER_MAJOR, SVT_JPEGXS_API_VER_MINOR,
+                                 &tmp_dec, first_bs, first_bs_size, &detected_img) == SvtJxsErrorNone) {
+        copy_img_cfg(&detected_img, &config_dec.image_config);
+        svt_jpeg_xs_decoder_close(&tmp_dec);
+    } else {
+        // Fallback: derive from macros if detection fails
+        fprintf(stderr, "Warning: decoder init for header parse failed, fallback to macros.\n");
+        config_dec.image_config.width = BUFFER_CODEC_WIDTH;
+        config_dec.image_config.height = BUFFER_CODEC_HEIGHT;
+        config_dec.image_config.bit_depth = BUFFER_CODEC_BIT_DEPTH;
+        config_dec.image_config.format = (BUFFER_CODEC_COLOUR_FORMAT == 0) ? COLOUR_FORMAT_PLANAR_YUV400 :
+                                         (BUFFER_CODEC_COLOUR_FORMAT == 1) ? COLOUR_FORMAT_PLANAR_YUV420 :
+                                         (BUFFER_CODEC_COLOUR_FORMAT == 2) ? COLOUR_FORMAT_PLANAR_YUV422 :
+                                                                             COLOUR_FORMAT_PLANAR_YUV444_OR_RGB;
+        // approximate planar sizes
+        const uint32_t bps = ((config_dec.image_config.bit_depth + 7) / 8);
+        if (config_dec.image_config.format == COLOUR_FORMAT_PLANAR_YUV400) {
+            config_dec.image_config.components_num = 1;
+            config_dec.image_config.components[0].width = config_dec.image_config.width;
+            config_dec.image_config.components[0].height = config_dec.image_config.height;
+            config_dec.image_config.components[0].byte_size = config_dec.image_config.width * config_dec.image_config.height * bps;
+        } else if (config_dec.image_config.format == COLOUR_FORMAT_PLANAR_YUV420) {
+            config_dec.image_config.components_num = 3;
+            config_dec.image_config.components[0].width = config_dec.image_config.width;
+            config_dec.image_config.components[0].height = config_dec.image_config.height;
+            config_dec.image_config.components[0].byte_size = config_dec.image_config.width * config_dec.image_config.height * bps;
+            config_dec.image_config.components[1].width = (config_dec.image_config.width + 1) / 2;
+            config_dec.image_config.components[1].height = (config_dec.image_config.height + 1) / 2;
+            config_dec.image_config.components[1].byte_size = config_dec.image_config.components[1].width * config_dec.image_config.components[1].height * bps;
+            config_dec.image_config.components[2] = config_dec.image_config.components[1];
+        } else if (config_dec.image_config.format == COLOUR_FORMAT_PLANAR_YUV422) {
+            config_dec.image_config.components_num = 3;
+            config_dec.image_config.components[0].width = config_dec.image_config.width;
+            config_dec.image_config.components[0].height = config_dec.image_config.height;
+            config_dec.image_config.components[0].byte_size = config_dec.image_config.width * config_dec.image_config.height * bps;
+            config_dec.image_config.components[1].width = (config_dec.image_config.width + 1) / 2;
+            config_dec.image_config.components[1].height = config_dec.image_config.height;
+            config_dec.image_config.components[1].byte_size = config_dec.image_config.components[1].width * config_dec.image_config.components[1].height * bps;
+            config_dec.image_config.components[2] = config_dec.image_config.components[1];
+        } else {
+            config_dec.image_config.components_num = 3;
+            for (int c = 0; c < 3; ++c) {
+                config_dec.image_config.components[c].width = config_dec.image_config.width;
+                config_dec.image_config.components[c].height = config_dec.image_config.height;
+                config_dec.image_config.components[c].byte_size = config_dec.image_config.width * config_dec.image_config.height * bps;
+            }
+        }
     }
 
     // allocate one output image buffer (contiguous)
     uint32_t out_frame_capacity = frame_size_from_cfg(&config_dec.image_config);
     uint8_t* out_frame = (uint8_t*)malloc(out_frame_capacity);
     if (!out_frame) { fprintf(stderr, "Memory allocation failed\n"); return SvtJxsErrorInsufficientResources; }
+
+    // Open VFW codec DLL and decompressor instance
+    HINSTANCE lib = LoadLibraryA("SvtJpegxsVfwCodec.dll");
+    if (!lib) { fprintf(stderr, "Failed to load SvtJpegxsVfwCodec.dll\n"); return SvtJxsErrorUndefined; }
+    FARPROC drv = GetProcAddress(lib, "DriverProc");
+    HIC hic = ICOpen(mmioFOURCC('S','J','X','S'), mmioFOURCC('J','X','S','D'), ICMODE_DECOMPRESS);
+    if (!hic && drv) {
+        hic = ICOpenFunction(mmioFOURCC('S','J','X','S'), mmioFOURCC('J','X','S','D'), ICMODE_DECOMPRESS, drv);
+    }
+    if (!hic) { fprintf(stderr, "ICOpen failed for decompressor\n"); FreeLibrary(lib); return SvtJxsErrorUndefined; }
+    if (ICSendMessage(hic, ICM_DECOMPRESS_BEGIN, 0, 0) != ICERR_OK) {
+        fprintf(stderr, "ICM_DECOMPRESS_BEGIN failed\n"); ICClose(hic); FreeLibrary(lib); return SvtJxsErrorUndefined; }
 
     uint8_t* bitstream_ptr = config_dec.bitstream_buf_ref + config_dec.bitstream_offset;
     uint64_t bitstream_size = config_dec.bitstream_buf_size - config_dec.bitstream_offset;
@@ -98,16 +157,23 @@ int32_t main(int32_t argc, char* argv[]) {
         uint32_t fs = 0;
         SvtJxsErrorType_t sz_ret = svt_jpeg_xs_decoder_get_single_frame_size(bitstream_ptr, (uint32_t)bitstream_size, NULL, &fs, 1);
         if (sz_ret != SvtJxsErrorNone || fs == 0 || fs > bitstream_size) break;
-        uint32_t out_used = 0;
-        int r = buffer_decoder_decode_frame(dec, bitstream_ptr, fs, out_frame, out_frame_capacity, &out_used);
-        if (r != 0) { fprintf(stderr, "Decode error %d\n", r); return_error = SvtJxsErrorUndefined; break; }
-        if (config_dec.out_file) { size_t wr = fwrite(out_frame, 1, out_used, config_dec.out_file); if (wr != out_used) break; }
+        SJXS_Decompress icd = {0};
+        icd.in = bitstream_ptr;
+        icd.in_size = fs;
+        icd.out = out_frame;
+        icd.out_capacity = out_frame_capacity;
+        if (ICSendMessage(hic, ICM_DECOMPRESS, (LPARAM)&icd, sizeof(icd)) != ICERR_OK) {
+            fprintf(stderr, "ICM_DECOMPRESS failed\n"); return_error = SvtJxsErrorUndefined; break;
+        }
+        if (config_dec.out_file) { size_t wr = fwrite(out_frame, 1, icd.out_used, config_dec.out_file); if (wr != icd.out_used) break; }
         bitstream_ptr += fs;
         bitstream_size -= fs;
         frames_done++;
     }
 
-    buffer_decoder_destroy(dec);
+    ICSendMessage(hic, ICM_DECOMPRESS_END, 0, 0);
+    ICClose(hic);
+    FreeLibrary(lib);
     free(out_frame);
     free(config_dec.bitstream_buf_ref);
     if (config_dec.in_file) fclose(config_dec.in_file);
