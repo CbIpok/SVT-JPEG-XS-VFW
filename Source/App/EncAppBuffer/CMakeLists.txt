@@ -9,24 +9,18 @@
 include_directories(
     ${PROJECT_SOURCE_DIR}/Source/API/
     ${PROJECT_SOURCE_DIR}/Source/App/Common/
+    ${PROJECT_SOURCE_DIR}/Source/App/BufferCodec/
     )
 
-file(GLOB all_files
-    "../../API/*.h"
-    "../Common/*.h"
-    "../Common/*.c"
-    "*.h"
-    "*.c"
-)
-
-# App Source Files
+# App Source Files (explicit to avoid old main)
 add_executable(EncAppBuffer
-    ${all_files})
+    EncAppConfig.c
+    MainBufferCodec.c)
 
 #********** SET COMPILE FLAGS************
 # Link the Encoder App
 target_link_libraries(EncAppBuffer
-    SvtJpegxsLib)
+    SvtJpegxsBufferCodec SvtJpegxsLib)
 
 if(UNIX)
     target_link_libraries(EncAppBuffer

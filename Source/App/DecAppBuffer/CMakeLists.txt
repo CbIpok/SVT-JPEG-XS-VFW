@@ -9,24 +9,18 @@
 include_directories(
     ${PROJECT_SOURCE_DIR}/Source/API/
     ${PROJECT_SOURCE_DIR}/Source/App/Common/
+    ${PROJECT_SOURCE_DIR}/Source/App/BufferCodec/
     )
 
-file(GLOB all_files
-    "../../API/*.h"
-    "../Common/*.h"
-    "../Common/*.c"
-    "*.h"
-    "*.c"
-)
-
-# App Source Files
+# App Source Files (explicit to avoid old main)
 add_executable(DecAppBuffer
-    ${all_files})
+    DecParamParser.c
+    MainBufferCodec.c)
 
 #********** SET COMPILE FLAGS************
 # Link the Decoder App
 target_link_libraries(DecAppBuffer
-    SvtJpegxsLib)
+    SvtJpegxsBufferCodec SvtJpegxsLib)
 
 if(UNIX)
     target_link_libraries(DecAppBuffer
