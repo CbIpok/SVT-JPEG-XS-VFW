@@ -13,6 +13,7 @@ build-*/
 *.raw
 *.log
 tests/data/override/*.cfg
+/tests/data/override/stream.jxs
 /.idea
 /cmake-build-debug-visual-studio
 /cmake-build-release-visual-studio
