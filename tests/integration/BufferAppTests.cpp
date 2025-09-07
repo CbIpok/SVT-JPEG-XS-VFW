@@ -32,8 +32,12 @@ fs::path find_override(const char *env_var, const std::string &name) {
 
 std::string read_cfg(const fs::path &path) {
     std::ifstream ifs(path);
-    std::string content;
-    std::getline(ifs, content);
+    std::string content((std::istreambuf_iterator<char>(ifs)), {});
+    for (char &c : content) {
+        if (c == '\n' || c == '\r') {
+            c = ' ';
+        }
+    }
     return content;
 }
 
