@@ -3,6 +3,7 @@
 #include <vfw.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "BufferCodec.h"
 
@@ -41,6 +42,33 @@ typedef struct VfwCodecCtx {
     int initialized_enc;
     int initialized_dec;
 } VfwCodecCtx;
+
+static void log_line(const char* tag, const char* msg) {
+    char path[MAX_PATH];
+    DWORD n = GetTempPathA(MAX_PATH, path);
+    if (n == 0 || n > MAX_PATH) return;
+    strcat_s(path, MAX_PATH, "SvtJpegxsVfwCodec.log");
+    FILE* f = NULL;
+    if (fopen_s(&f, path, "a+") == 0 && f) {
+        SYSTEMTIME st; GetLocalTime(&st);
+        fprintf(f, "%04d-%02d-%02d %02d:%02d:%02d.%03d [%s] %s\n",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+                tag, msg);
+        fclose(f);
+    }
+    OutputDebugStringA(msg);
+}
+
+BOOL APIENTRY DllMain(HINSTANCE hInstance, DWORD reason, LPVOID reserved) {
+    (void)hInstance; (void)reserved;
+    switch (reason) {
+    case DLL_PROCESS_ATTACH: log_line("DllMain", "PROCESS_ATTACH"); break;
+    case DLL_THREAD_ATTACH:  log_line("DllMain", "THREAD_ATTACH"); break;
+    case DLL_THREAD_DETACH:  log_line("DllMain", "THREAD_DETACH"); break;
+    case DLL_PROCESS_DETACH: log_line("DllMain", "PROCESS_DETACH"); break;
+    }
+    return TRUE;
+}
 
 static VfwCodecCtx* ctx_alloc(void) {
     VfwCodecCtx* c = (VfwCodecCtx*)calloc(1, sizeof(VfwCodecCtx));
@@ -122,28 +150,63 @@ __declspec(dllexport) LRESULT CALLBACK DriverProc(DWORD_PTR dwDriverId, HDRVR hd
     (void)hdrvr;
     VfwCodecCtx* c = (VfwCodecCtx*)dwDriverId;
     switch (uMsg) {
+    case DRV_LOAD:         log_line("DriverProc", "DRV_LOAD"); return 1;
+    case DRV_FREE:         log_line("DriverProc", "DRV_FREE"); return 1;
+    case DRV_ENABLE:       log_line("DriverProc", "DRV_ENABLE"); return 1;
+    case DRV_DISABLE:      log_line("DriverProc", "DRV_DISABLE"); return 1;
     case DRV_OPEN:
+        log_line("DriverProc", "DRV_OPEN");
         return (LRESULT)ctx_alloc();
     case DRV_CLOSE:
+        log_line("DriverProc", "DRV_CLOSE");
         ctx_free(c);
         return 1;
+    case ICM_GETINFO:
+        log_line("DriverProc", "ICM_GETINFO");
+        if (lParam1 && lParam2 >= sizeof(ICINFO)) {
+            ICINFO* info = (ICINFO*)lParam1;
+            memset(info, 0, sizeof(*info));
+            info->dwSize = sizeof(ICINFO);
+            info->fccType = ICTYPE_VIDEO; // mmioFOURCC('v','i','d','c')
+            info->fccHandler = mmioFOURCC('S','J','X','S');
+            info->dwVersion = 0x00010000;
+            info->dwVersionICM = 0x00010000;
+            info->dwFlags = 0; // no ABOUT/CONFIG dialogs
+            const wchar_t* name = L"SVT JPEG XS";
+            const wchar_t* desc = L"SVT JPEG XS VFW Codec";
+            const wchar_t* drv = L"SvtJpegxsVfwCodec.dll";
+            wcsncpy(info->szName, name, sizeof(info->szName)/sizeof(info->szName[0]) - 1);
+            wcsncpy(info->szDescription, desc, sizeof(info->szDescription)/sizeof(info->szDescription[0]) - 1);
+            wcsncpy(info->szDriver, drv, sizeof(info->szDriver)/sizeof(info->szDriver[0]) - 1);
+            return sizeof(ICINFO);
+        }
+        return ICERR_UNSUPPORTED;
     case ICM_COMPRESS_QUERY:
+        log_line("DriverProc", "ICM_COMPRESS_QUERY");
         return ICERR_OK;
     case ICM_COMPRESS_BEGIN:
+        log_line("DriverProc", "ICM_COMPRESS_BEGIN");
         return on_icm_compress_begin(c);
     case ICM_COMPRESS:
+        log_line("DriverProc", "ICM_COMPRESS");
         return on_icm_compress(c, (SJXS_Compress*)lParam1);
     case ICM_COMPRESS_END:
+        log_line("DriverProc", "ICM_COMPRESS_END");
         return on_icm_compress_end(c);
     case ICM_DECOMPRESS_QUERY:
+        log_line("DriverProc", "ICM_DECOMPRESS_QUERY");
         return ICERR_OK;
     case ICM_DECOMPRESS_BEGIN:
+        log_line("DriverProc", "ICM_DECOMPRESS_BEGIN");
         return on_icm_decompress_begin(c);
     case ICM_DECOMPRESS:
+        log_line("DriverProc", "ICM_DECOMPRESS");
         return on_icm_decompress(c, (SJXS_Decompress*)lParam1);
     case ICM_DECOMPRESS_END:
+        log_line("DriverProc", "ICM_DECOMPRESS_END");
         return on_icm_decompress_end(c);
     default:
+        log_line("DriverProc", "UNKNOWN_MSG");
         return ICERR_UNSUPPORTED;
     }
 }
