@@ -41,6 +41,16 @@ typedef struct VfwCodecCtx {
     uint32_t bs_capacity;
     int initialized_enc;
     int initialized_dec;
+    // temp buffers
+    uint8_t* tmp_in;
+    uint32_t tmp_in_size;
+    uint8_t* tmp_out;
+    uint32_t tmp_out_size;
+    // vfw formats
+    DWORD in_fourcc;
+    DWORD out_fourcc;
+    int width;
+    int height;
 } VfwCodecCtx;
 
 static void log_line(const char* tag, const char* msg) {
@@ -85,13 +95,30 @@ static void ctx_free(VfwCodecCtx* c) {
         buffer_decoder_destroy(c->dec);
         c->dec = NULL;
     }
+    if (c->tmp_in) free(c->tmp_in);
+    if (c->tmp_out) free(c->tmp_out);
     free(c);
 }
 
 static LRESULT on_icm_compress_begin(VfwCodecCtx* c) {
     if (!c) return ICERR_ERROR;
     if (c->initialized_enc) return ICERR_OK;
-    c->enc = buffer_encoder_create();
+    if (c->width > 0 && c->height > 0) {
+        c->enc = buffer_encoder_create_with_params((uint32_t)c->width,
+                                                   (uint32_t)c->height,
+                                                   8,
+                                                   1 /* YUV420 */,
+                                                   BUFFER_CODEC_BPP_NUM,
+                                                   BUFFER_CODEC_BPP_DEN,
+                                                   BUFFER_CODEC_DECOMP_V,
+                                                   BUFFER_CODEC_DECOMP_H,
+                                                   BUFFER_CODEC_QUANT,
+                                                   BUFFER_CODEC_SLICE_HEIGHT,
+                                                   BUFFER_CODEC_THREADS,
+                                                   BUFFER_CODEC_PROFILE);
+    } else {
+        c->enc = buffer_encoder_create();
+    }
     if (!c->enc) return ICERR_ERROR;
     if (buffer_encoder_get_image_config(c->enc, &c->img, &c->bs_capacity) != 0) return ICERR_ERROR;
     c->initialized_enc = 1;
@@ -183,25 +210,132 @@ __declspec(dllexport) LRESULT CALLBACK DriverProc(DWORD_PTR dwDriverId, HDRVR hd
         return ICERR_UNSUPPORTED;
     case ICM_COMPRESS_QUERY:
         log_line("DriverProc", "ICM_COMPRESS_QUERY");
+        // For VirtualDub, ensure input is YV12 or I420 8-bit planar
+        if (lParam1) {
+            LPBITMAPINFOHEADER lpbi = (LPBITMAPINFOHEADER)lParam1;
+            if (lpbi->biCompression == mmioFOURCC('Y','V','1','2') || lpbi->biCompression == mmioFOURCC('I','4','2','0')) {
+                if (!(lpbi->biWidth & 1) && !(lpbi->biHeight & 1) && lpbi->biBitCount == 12) return ICERR_OK;
+                return ICERR_BADFORMAT;
+            }
+            return ICERR_BADFORMAT;
+        }
         return ICERR_OK;
+    case ICM_COMPRESS_GET_FORMAT: {
+        log_line("DriverProc", "ICM_COMPRESS_GET_FORMAT");
+        LPBITMAPINFOHEADER lpbiIn = (LPBITMAPINFOHEADER)lParam1;
+        LPBITMAPINFOHEADER lpbiOut = (LPBITMAPINFOHEADER)lParam2;
+        if (!lpbiIn) return ICERR_BADFORMAT;
+        if (!lpbiOut) return sizeof(BITMAPINFOHEADER);
+        memset(lpbiOut, 0, sizeof(BITMAPINFOHEADER));
+        lpbiOut->biSize = sizeof(BITMAPINFOHEADER);
+        lpbiOut->biWidth = lpbiIn->biWidth;
+        lpbiOut->biHeight = lpbiIn->biHeight;
+        lpbiOut->biPlanes = 1;
+        lpbiOut->biBitCount = 0; // compressed
+        lpbiOut->biCompression = mmioFOURCC('S','J','X','S');
+        DWORD w = (DWORD)lpbiIn->biWidth, h = (DWORD)lpbiIn->biHeight;
+        lpbiOut->biSizeImage = w*h*2; // conservative
+        return ICERR_OK;
+    }
+    case ICM_COMPRESS_GET_SIZE: {
+        log_line("DriverProc", "ICM_COMPRESS_GET_SIZE");
+        LPBITMAPINFOHEADER lpbiIn = (LPBITMAPINFOHEADER)lParam1;
+        if (!lpbiIn) return ICERR_BADFORMAT;
+        DWORD w = (DWORD)lpbiIn->biWidth, h = (DWORD)lpbiIn->biHeight;
+        return (LRESULT)(w*h*2);
+    }
     case ICM_COMPRESS_BEGIN:
         log_line("DriverProc", "ICM_COMPRESS_BEGIN");
+        // VirtualDub passes input/output headers here
+        if (lParam1) {
+            LPBITMAPINFOHEADER lpbiIn = (LPBITMAPINFOHEADER)lParam1;
+            if (c) { c->width = lpbiIn->biWidth; c->height = lpbiIn->biHeight; c->in_fourcc = lpbiIn->biCompression; }
+        }
         return on_icm_compress_begin(c);
     case ICM_COMPRESS:
         log_line("DriverProc", "ICM_COMPRESS");
-        return on_icm_compress(c, (SJXS_Compress*)lParam1);
+        if (lParam2 == sizeof(SJXS_Compress)) {
+            return on_icm_compress(c, (SJXS_Compress*)lParam1);
+        } else {
+            // Treat as ICCOMPRESS
+            if (!c || !c->enc) return ICERR_ERROR;
+            ICCOMPRESS* ic = (ICCOMPRESS*)lParam1;
+            if (!ic || !ic->lpInput || !ic->lpbiInput || !ic->lpOutput || !ic->lpbiOutput) return ICERR_BADPARAM;
+            const uint8_t* in = (const uint8_t*)ic->lpInput;
+            uint8_t* out = (uint8_t*)ic->lpOutput;
+            DWORD out_cap = ic->lpbiOutput->biSizeImage;
+            uint32_t w = (uint32_t)ic->lpbiInput->biWidth, h = (uint32_t)ic->lpbiInput->biHeight;
+            uint32_t ysz = w*h; uint32_t csz = (w/2)*(h/2); uint32_t need = ysz + 2*csz;
+            if (c->tmp_in_size < need) { free(c->tmp_in); c->tmp_in = (uint8_t*)malloc(need); c->tmp_in_size = need; }
+            if (!c->tmp_in) return ICERR_MEMORY;
+            const uint8_t* y = in; const uint8_t* p1 = in + ysz; const uint8_t* p2 = in + ysz + csz;
+            if (c->in_fourcc == mmioFOURCC('Y','V','1','2')) { memcpy(c->tmp_in, y, ysz); memcpy(c->tmp_in+ysz, p2, csz); memcpy(c->tmp_in+ysz+csz, p1, csz);} else { memcpy(c->tmp_in, y, need);}            
+            uint32_t used = 0; int r = buffer_encoder_encode_frame(c->enc, c->tmp_in, out, out_cap, &used);
+            if (r != 0) return ICERR_ERROR;
+            ic->lpbiOutput->biSizeImage = used; if (ic->lpdwFlags) *ic->lpdwFlags = 0; return ICERR_OK;
+        }
     case ICM_COMPRESS_END:
         log_line("DriverProc", "ICM_COMPRESS_END");
         return on_icm_compress_end(c);
     case ICM_DECOMPRESS_QUERY:
         log_line("DriverProc", "ICM_DECOMPRESS_QUERY");
+        if (!lParam1) return ICERR_BADFORMAT;
+        if (((LPBITMAPINFOHEADER)lParam1)->biCompression != mmioFOURCC('S','J','X','S')) return ICERR_BADFORMAT;
+        if (lParam2) {
+            DWORD outfcc = ((LPBITMAPINFOHEADER)lParam2)->biCompression;
+            if (!(outfcc == mmioFOURCC('Y','V','1','2') || outfcc == mmioFOURCC('I','4','2','0'))) return ICERR_BADFORMAT;
+        }
         return ICERR_OK;
+    case ICM_DECOMPRESS_GET_FORMAT: {
+        log_line("DriverProc", "ICM_DECOMPRESS_GET_FORMAT");
+        LPBITMAPINFOHEADER lpbiIn = (LPBITMAPINFOHEADER)lParam1;
+        LPBITMAPINFOHEADER lpbiOut = (LPBITMAPINFOHEADER)lParam2;
+        if (!lpbiIn) return ICERR_BADFORMAT;
+        if (!lpbiOut) return sizeof(BITMAPINFOHEADER);
+        memset(lpbiOut, 0, sizeof(BITMAPINFOHEADER));
+        lpbiOut->biSize = sizeof(BITMAPINFOHEADER);
+        lpbiOut->biWidth = lpbiIn->biWidth;
+        lpbiOut->biHeight = lpbiIn->biHeight;
+        lpbiOut->biPlanes = 1;
+        lpbiOut->biBitCount = 12;
+        lpbiOut->biCompression = mmioFOURCC('Y','V','1','2');
+        DWORD w = (DWORD)lpbiOut->biWidth, h = (DWORD)lpbiOut->biHeight;
+        lpbiOut->biSizeImage = w*h + 2*((w/2)*(h/2));
+        return ICERR_OK;
+    }
     case ICM_DECOMPRESS_BEGIN:
         log_line("DriverProc", "ICM_DECOMPRESS_BEGIN");
+        if (lParam2) c->out_fourcc = ((LPBITMAPINFOHEADER)lParam2)->biCompression; else c->out_fourcc = mmioFOURCC('Y','V','1','2');
         return on_icm_decompress_begin(c);
     case ICM_DECOMPRESS:
         log_line("DriverProc", "ICM_DECOMPRESS");
-        return on_icm_decompress(c, (SJXS_Decompress*)lParam1);
+        if (lParam2 == sizeof(SJXS_Decompress)) {
+            return on_icm_decompress(c, (SJXS_Decompress*)lParam1);
+        } else {
+            if (!c) return ICERR_ERROR;
+            ICDECOMPRESS* icd = (ICDECOMPRESS*)lParam1;
+            if (!icd || !icd->lpInput || !icd->lpbiInput || !icd->lpOutput || !icd->lpbiOutput) return ICERR_BADPARAM;
+            const uint8_t* bitstream = (const uint8_t*)icd->lpInput;
+            uint32_t bs_size = icd->lpbiInput->biSizeImage;
+            if (!c->dec) {
+                if (bs_size == 0) return ICERR_BADPARAM;
+                c->dec = buffer_decoder_create_from_bitstream(bitstream, bs_size, &c->img);
+                if (!c->dec) return ICERR_ERROR;
+                c->width = (int)c->img.width; c->height = (int)c->img.height;
+            }
+            uint32_t ysz = c->img.width * c->img.height;
+            uint32_t csz = (c->img.width/2) * (c->img.height/2);
+            uint32_t need = ysz + 2*csz;
+            if (c->tmp_out_size < need) { free(c->tmp_out); c->tmp_out = (uint8_t*)malloc(need); c->tmp_out_size = need; }
+            if (!c->tmp_out) return ICERR_MEMORY;
+            uint32_t out_used = 0; int r = buffer_decoder_decode_frame(c->dec, bitstream, bs_size, c->tmp_out, c->tmp_out_size, &out_used);
+            if (r != 0) return ICERR_ERROR;
+            uint8_t* dst = (uint8_t*)icd->lpOutput; uint8_t* src = c->tmp_out;
+            const uint8_t* sY = src; const uint8_t* sU = src + ysz; const uint8_t* sV = src + ysz + csz;
+            memcpy(dst, sY, ysz);
+            if (c->out_fourcc == mmioFOURCC('I','4','2','0')) { memcpy(dst+ysz, sU, csz); memcpy(dst+ysz+csz, sV, csz);} else { memcpy(dst+ysz, sV, csz); memcpy(dst+ysz+csz, sU, csz);}            
+            return ICERR_OK;
+        }
     case ICM_DECOMPRESS_END:
         log_line("DriverProc", "ICM_DECOMPRESS_END");
         return on_icm_decompress_end(c);

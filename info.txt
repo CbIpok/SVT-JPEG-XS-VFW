@@ -1,0 +1,44 @@
+$ ./ffmpeg.exe -i input.mp4 -c:v jpegxs -bpp 4 -threads 8 output.avi
+ffmpeg version n6.1.2-33-g72abad6d38 Copyright (c) 2000-2024 the FFmpeg developers
+  built with gcc 15.1.0 (Rev1, Built by MSYS2 project)
+  configuration: --prefix=/c/dmitrienkomy/cpp/jxs_ffmpeg/install-dir --disable-static --enable-share
+d --enable-gpl --enable-libsvtjpegxs --disable-debug
+  libavutil      58. 29.100 / 58. 29.100
+  libavcodec     60. 31.102 / 60. 31.102
+  libavformat    60. 16.100 / 60. 16.100
+  libavdevice    60.  3.100 / 60.  3.100
+  libavfilter     9. 12.100 /  9. 12.100
+  libswscale      7.  5.100 /  7.  5.100
+  libswresample   4. 12.100 /  4. 12.100
+  libpostproc    57.  3.100 / 57.  3.100
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'input.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf61.7.100
+  Duration: 00:00:04.04, start: 0.000000, bitrate: 27379 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 38
+40x2160, 27375 kb/s, 24.25 fps, 24 tbr, 12288 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      vendor_id       : [0][0][0][0]
+      encoder         : Lavc61.19.100 libx264
+Stream mapping:
+  Stream #0:0 -> #0:0 (h264 (native) -> jpegxs (libsvtjpegxs))
+Press [q] to stop, [?] for help
+Output #0, avi, to 'output.avi':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    ISFT            : Lavf60.16.100
+  Stream #0:0(und): Video: jpegxs, yuv420p(tv, bt709, progressive), 3840x2160, q=2-31, 200 kb/s, 24
+fps, 24 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      vendor_id       : [0][0][0][0]
+      encoder         : Lavc60.31.102 libsvtjpegxs
+[out#0/avi @ 00000238050aeec0] video:396900kB audio:0kB subtitle:0kB other streams:0kB global header
+s:0kB muxing overhead: 0.001978%
+frame=   98 fps= 61 q=-0.0 Lsize=  396908kB time=00:00:04.04 bitrate=804487.1kbits/s speed=2.51x

@@ -97,6 +97,54 @@ buffer_encoder_t* buffer_encoder_create(void) {
     return h;
 }
 
+buffer_encoder_t* buffer_encoder_create_with_params(uint32_t width,
+                                                    uint32_t height,
+                                                    uint8_t bit_depth,
+                                                    int colour_format,
+                                                    uint32_t bpp_num,
+                                                    uint32_t bpp_den,
+                                                    uint8_t ndecomp_v,
+                                                    uint8_t ndecomp_h,
+                                                    uint8_t quant,
+                                                    uint32_t slice_height,
+                                                    uint32_t threads,
+                                                    uint8_t profile) {
+    buffer_encoder_t* h = (buffer_encoder_t*)calloc(1, sizeof(*h));
+    if (!h) return NULL;
+    svt_jpeg_xs_encoder_load_default_parameters(SVT_JPEGXS_API_VER_MAJOR, SVT_JPEGXS_API_VER_MINOR, &h->enc);
+    h->enc.source_width = width;
+    h->enc.source_height = height;
+    h->enc.input_bit_depth = bit_depth;
+    h->enc.colour_format = map_colour_format(colour_format);
+    h->enc.bpp_numerator = bpp_num;
+    h->enc.bpp_denominator = bpp_den;
+    h->enc.ndecomp_v = ndecomp_v;
+    h->enc.ndecomp_h = ndecomp_h;
+    h->enc.quantization = quant;
+    h->enc.slice_height = slice_height;
+    h->enc.threads_num = threads;
+    h->enc.cpu_profile = profile;
+
+    uint32_t bytes_per_frame = 0;
+    if (svt_jpeg_xs_encoder_get_image_config(SVT_JPEGXS_API_VER_MAJOR,
+                                             SVT_JPEGXS_API_VER_MINOR,
+                                             &h->enc,
+                                             &h->img,
+                                             &bytes_per_frame) != SvtJxsErrorNone) {
+        free(h);
+        return NULL;
+    }
+    h->bitstream_capacity = bytes_per_frame;
+    h->pool = svt_jpeg_xs_frame_pool_alloc(&h->img, bytes_per_frame, 3);
+    if (!h->pool) { free(h); return NULL; }
+    if (svt_jpeg_xs_encoder_init(SVT_JPEGXS_API_VER_MAJOR, SVT_JPEGXS_API_VER_MINOR, &h->enc) != SvtJxsErrorNone) {
+        svt_jpeg_xs_frame_pool_free(h->pool);
+        free(h);
+        return NULL;
+    }
+    return h;
+}
+
 int buffer_encoder_get_image_config(buffer_encoder_t* h, buffer_image_config_t* out_cfg, uint32_t* out_frame_bytes_capacity) {
     if (!h || !out_cfg) return -1;
     out_cfg->width = h->img.width;

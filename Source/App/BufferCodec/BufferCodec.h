@@ -71,6 +71,18 @@ typedef struct buffer_image_config {
 
 /* ENCODER */
 buffer_encoder_t* buffer_encoder_create(void);
+buffer_encoder_t* buffer_encoder_create_with_params(uint32_t width,
+                                                    uint32_t height,
+                                                    uint8_t bit_depth,
+                                                    int colour_format /* 0=YUV400,1=YUV420,2=YUV422,3=YUV444 */,
+                                                    uint32_t bpp_num,
+                                                    uint32_t bpp_den,
+                                                    uint8_t ndecomp_v,
+                                                    uint8_t ndecomp_h,
+                                                    uint8_t quant,
+                                                    uint32_t slice_height,
+                                                    uint32_t threads,
+                                                    uint8_t profile);
 int buffer_encoder_get_image_config(buffer_encoder_t* enc, buffer_image_config_t* out_cfg, uint32_t* out_frame_bytes_capacity);
 /* in_image points to a contiguous planar buffer in the order of components from buffer_image_config_t */
 int buffer_encoder_encode_frame(buffer_encoder_t* enc,
